@@ -124,15 +124,59 @@ node ./src/server.js
 
 在你的 OpenCode 配置文件 `opencode.jsonc` 中添加 MCP 配置。
 
-> **注意：不同 OpenCode 版本的 MCP 配置字段可能略有差异。核心要点是：command 使用 `node`，args 指向本项目的 `src/server.js`，env 中配置所有生图参数。**
+> **重点：OpenCode 的 local MCP 配置中，`command` 是数组，环境变量字段叫 `environment`。**
+>
+> 也就是：
+>
+> - `command`: `['node', '/absolute/path/to/gpt-img2-mcp/src/server.js']`
+> - `environment`: MCP 进程启动时注入的环境变量
 
 示例：
 
 ```jsonc
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "gpt-img2": {
       "type": "local",
+      "command": [
+        "node",
+        "/absolute/path/to/gpt-img2-mcp/src/server.js"
+      ],
+      "enabled": true,
+      "environment": {
+        "GPT_IMG2_BASE_URL": "https://your-cpa-domain.example/v1",
+        "GPT_IMG2_API_KEY": "your-cpa-api-key",
+
+        "GPT_IMG2_MODEL": "gpt-image-2",
+        "GPT_IMG2_SIZE": "1024x1024",
+        "GPT_IMG2_QUALITY": "high",
+        "GPT_IMG2_OUTPUT_FORMAT": "png",
+        "GPT_IMG2_RESPONSE_FORMAT": "b64_json",
+
+        "GPT_IMG2_OUTPUT_DIR": "/absolute/path/to/save/images"
+      }
+    }
+  }
+}
+```
+
+> **不要在 OpenCode 配置里写成 `"command": "node"` + `"args": [...]` + `"env": {...}`。**
+>
+> 那是一些 stdio MCP 客户端常见的拆分写法，不是 OpenCode 官方 local MCP 配置格式。
+
+---
+
+## 通用 stdio MCP 客户端配置格式
+
+如果你不是在 OpenCode 中使用，而是在其他支持 stdio MCP 的客户端中使用，本项目本质上仍是一个 stdio MCP server。
+
+部分 stdio MCP 客户端会使用下面这种拆分格式：
+
+```jsonc
+{
+  "mcpServers": {
+    "gpt-img2": {
       "command": "node",
       "args": [
         "/absolute/path/to/gpt-img2-mcp/src/server.js"
@@ -153,6 +197,10 @@ node ./src/server.js
   }
 }
 ```
+
+> **重点：上面是通用 stdio MCP 客户端示例，不是 OpenCode 示例。**
+>
+> 在 OpenCode 中请使用上一节的 `mcp.gpt-img2.command` 数组和 `environment` 字段。
 
 ### 必填环境变量
 
