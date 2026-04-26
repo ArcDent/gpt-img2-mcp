@@ -1,0 +1,26 @@
+{
+  "name": "gpt-img2-mcp",
+  "version": "0.1.0",
+  "description": "Prompt-only MCP server for CPA gpt-image-2 image generation.",
+  "type": "module",
+  "bin": {
+    "gpt-img2-mcp": "./src/server.js"
+  },
+  "scripts": {
+    "start": "node ./src/server.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "mcp",
+    "gpt-image-2",
+    "cliproxyapi",
+    "opencode"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
