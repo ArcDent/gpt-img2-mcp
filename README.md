@@ -1,15 +1,17 @@
 # gpt-img2-mcp
 
-轻量级 stdio MCP server，用于通过 CLIProxyAPI / CPA 或兼容 OpenAI Images API 的服务调用 `gpt-image-2` 生图。
+轻量级 stdio MCP server，用于通过 CLIProxyAPI / CPA 或兼容 OpenAI Images API 的服务调用 `gpt-image-2` 生图与编辑。
 
-本 MCP **暴露两个工具**：
+本 MCP **暴露四个工具**：
 
 ```text
 generate_image
 generate_image_with_size
+edit_image
+edit_image_with_size
 ```
 
-默认工具 `generate_image` 的可用参数 **只有一个**：
+默认生图工具 `generate_image` 的可用参数 **只有一个**：
 
 ```json
 {
@@ -17,7 +19,7 @@ generate_image_with_size
 }
 ```
 
-尺寸覆盖工具 `generate_image_with_size` 的参数是：
+尺寸覆盖生图工具 `generate_image_with_size` 的参数是：
 
 ```json
 {
@@ -26,40 +28,74 @@ generate_image_with_size
 }
 ```
 
-其他所有参数，例如 base URL、API key、模型、质量、输出格式、保存目录等，都通过 OpenCode 的 `opencode.jsonc` MCP 配置手动传入。
+默认编辑工具 `edit_image` 的参数是：
+
+```json
+{
+  "prompt": "在原图基础上做什么修改",
+  "image_url": "https://example.com/input.png"
+}
+```
+
+尺寸覆盖编辑工具 `edit_image_with_size` 的参数是：
+
+```json
+{
+  "prompt": "在原图基础上做什么修改",
+  "image_url": "data:image/png;base64,...",
+  "size": "1536x1024"
+}
+```
+
+其中 `image_url` 支持 HTTPS URL，也支持 data URL（`data:image/...;base64,...`）。
+
+其他所有参数，例如 base URL、API key、模型、质量、输出格式、流式开关、保存目录等，都通过 OpenCode 的 `opencode.jsonc` MCP 配置手动传入。
 
 ---
 
 ## 适用场景
 
 - 你已经有 CPA / CLIProxyAPI 服务。
-- CPA 支持 `/v1/images/generations`。
-- 你想在 OpenCode 里通过 MCP 快速生成图片。
+- CPA 支持 `/v1/images/generations` 和 `/v1/images/edits`。
+- 你想在 OpenCode 里通过 MCP 快速生成图片或基于已有图片编辑。
 - 你希望默认 MCP 工具接口保持极简，调用时只填 `prompt`。
 - 你也希望在需要时通过另一个工具仅额外覆盖本次请求的 `size`。
+- 你希望默认走流式请求，降低长耗时生图请求的超时概率。
 
 ---
 
 ## 重点特性
 
-> **重点：默认工具只暴露 `prompt`。**
+> **重点：MCP 默认使用流式生图（`stream: true`）。**
 >
-> `generate_image` 只接受用户传入的 `prompt`，尺寸来自 `GPT_IMG2_SIZE`。
+> 默认流式可以降低长耗时图片请求在非流式模式下的超时风险。MCP 会消费 SSE 事件，并且只保存完成态的最终图片。
 
-> **重点：新增尺寸工具只额外暴露 `size`。**
+> **重点：中间事件不会落盘。**
 >
-> `generate_image_with_size` 只接受 `prompt` 和 `size`，其中 `size` 只覆盖本次请求，不会修改环境变量。
+> 流式过程中的 partial image 事件只会计数到结果元数据，不会作为本地文件保存。
+
+> **重点：当前提供 4 个工具，覆盖生图与编辑。**
+>
+> - `generate_image`
+> - `generate_image_with_size`
+> - `edit_image`
+> - `edit_image_with_size`
+
+> **重点：编辑接口走 JSON `image_url`，不走 multipart。**
+>
+> 编辑请求调用 `/v1/images/edits`，请求体使用 `images: [{ image_url: "..." }]`。本轻量 MCP 不支持 multipart 上传与 mask 参数。
 
 > **重点：prompt 没有被固定。**
 >
 > MCP 工具和 OpenCode 命令都使用用户本次传入的提示词；命令文件使用 `$ARGUMENTS` 作为 prompt。
 
-> **重点：默认调用 Images API。**
+> **重点：默认调用 Images API（生图 + 编辑）。**
 >
 > 实际请求地址为：
 >
 > ```text
 > ${GPT_IMG2_BASE_URL}/images/generations
+> ${GPT_IMG2_BASE_URL}/images/edits
 > ```
 
 > **重点：默认模型是 `gpt-image-2`。**
@@ -153,6 +189,7 @@ node ./src/server.js
         "GPT_IMG2_QUALITY": "high",
         "GPT_IMG2_OUTPUT_FORMAT": "png",
         "GPT_IMG2_RESPONSE_FORMAT": "b64_json",
+        "GPT_IMG2_STREAM": "true",
 
         "GPT_IMG2_OUTPUT_DIR": "/absolute/path/to/save/images"
       }
@@ -190,6 +227,7 @@ node ./src/server.js
         "GPT_IMG2_QUALITY": "high",
         "GPT_IMG2_OUTPUT_FORMAT": "png",
         "GPT_IMG2_RESPONSE_FORMAT": "b64_json",
+        "GPT_IMG2_STREAM": "true",
 
         "GPT_IMG2_OUTPUT_DIR": "/absolute/path/to/save/images"
       }
@@ -218,12 +256,20 @@ node ./src/server.js
 | `GPT_IMG2_QUALITY` | `high` | 图片质量 |
 | `GPT_IMG2_OUTPUT_FORMAT` | `png` | 输出格式，例如 `png`、`webp`、`jpeg` |
 | `GPT_IMG2_RESPONSE_FORMAT` | `b64_json` | 响应格式，支持 `b64_json` 或 data URL 风格的 `url` |
+| `GPT_IMG2_STREAM` | `true` | 是否默认使用流式请求（SSE） |
 | `GPT_IMG2_OUTPUT_DIR` | MCP 当前工作目录 | 图片保存目录 |
 | `GPT_IMG2_BACKGROUND` | 空 | 可选背景参数 |
 | `GPT_IMG2_MODERATION` | 空 | 可选审核参数 |
 | `GPT_IMG2_OUTPUT_COMPRESSION` | 空 | 可选压缩参数，数字 |
 | `GPT_IMG2_PARTIAL_IMAGES` | 空 | 可选中间图片数量，数字 |
 | `GPT_IMG2_USER_AGENT` | `gpt-img2-mcp/0.1.0` | 请求上游时使用的 User-Agent |
+
+`GPT_IMG2_STREAM` 默认值是 `true`。可识别值如下：
+
+- 视为 `true`：`true`、`1`、`yes`、`on`
+- 视为 `false`：`false`、`0`、`no`、`off`
+
+当设置为 `false` 时，MCP 将回退到非流式 JSON 请求。
 
 ---
 
@@ -234,9 +280,11 @@ node ./src/server.js
 ```text
 generate_image
 generate_image_with_size
+edit_image
+edit_image_with_size
 ```
 
-### 1. 默认尺寸：`generate_image`
+### 1. 默认尺寸生图：`generate_image`
 
 调用原有工具时只需要传入：
 
@@ -248,7 +296,7 @@ generate_image_with_size
 
 这个工具不会固定 prompt，`prompt` 始终来自本次工具调用参数。
 
-### 2. 指定尺寸：`generate_image_with_size`
+### 2. 指定尺寸生图：`generate_image_with_size`
 
 如果要为本次请求指定尺寸，调用新增工具：
 
@@ -261,13 +309,50 @@ generate_image_with_size
 
 `size` 只影响本次请求，不会修改 `opencode.jsonc` 中的 `GPT_IMG2_SIZE`。
 
+### 3. 默认尺寸编辑：`edit_image`
+
+编辑工具传入 `prompt` + `image_url`。`image_url` 可以是 HTTPS，也可以是 data URL。
+
+HTTPS 示例：
+
+```json
+{
+  "prompt": "把画面改成夜景，增强霓虹灯反射",
+  "image_url": "https://example.com/source.png"
+}
+```
+
+data URL 示例：
+
+```json
+{
+  "prompt": "保留人物姿态，替换成赛博朋克背景",
+  "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA..."
+}
+```
+
+### 4. 指定尺寸编辑：`edit_image_with_size`
+
+如果本次编辑需要覆盖尺寸，使用：
+
+```json
+{
+  "prompt": "把背景改成雪山日出，整体更通透",
+  "image_url": "https://example.com/source.png",
+  "size": "1536x1024"
+}
+```
+
 返回结果是文本 JSON，包含图片保存位置等信息，例如：
 
 ```json
 {
   "ok": true,
-  "path": "/absolute/path/to/save/images/gpt-image-20260426-123456-abc123.png",
-  "fileName": "gpt-image-20260426-123456-abc123.png",
+  "operation": "edit",
+  "streamed": true,
+  "partialImageCount": 2,
+  "path": "/absolute/path/to/save/images/gpt-image-edit-20260426-123456-abc123.png",
+  "fileName": "gpt-image-edit-20260426-123456-abc123.png",
   "bytes": 956939,
   "mimeType": "image/png",
   "model": "gpt-image-2",
@@ -276,6 +361,12 @@ generate_image_with_size
   "outputFormat": "png"
 }
 ```
+
+其中：
+
+- `operation`：`generation` 或 `edit`
+- `streamed`：本次是否使用流式请求
+- `partialImageCount`：流式过程中收到的 partial image 事件数量（不会保存为本地文件）
 
 ---
 
@@ -319,6 +410,7 @@ CPA 对 `gpt-image-2` 的调用应走 Images API：
 
 ```text
 POST /v1/images/generations
+POST /v1/images/edits
 ```
 
 不要把 `gpt-image-2` 当普通聊天模型直接用于：
@@ -327,13 +419,14 @@ POST /v1/images/generations
 - `/v1/responses`
 - `/v1/messages`
 
-本 MCP 内部固定调用：
+本 MCP 内部调用：
 
 ```text
 ${GPT_IMG2_BASE_URL}/images/generations
+${GPT_IMG2_BASE_URL}/images/edits
 ```
 
-请求体中会自动加入：
+生图请求体会自动加入：
 
 ```json
 {
@@ -342,11 +435,40 @@ ${GPT_IMG2_BASE_URL}/images/generations
   "size": "1024x1024",
   "quality": "high",
   "output_format": "png",
-  "response_format": "b64_json"
+  "response_format": "b64_json",
+  "stream": true
 }
 ```
 
-其中 `generate_image` 的 `size` 来自环境变量；`generate_image_with_size` 的 `size` 来自本次工具调用参数。其他非 prompt / size 参数都可通过环境变量覆盖。
+编辑请求体会自动加入：
+
+```json
+{
+  "model": "gpt-image-2",
+  "prompt": "...",
+  "images": [
+    {
+      "image_url": "https://example.com/source.png"
+    }
+  ],
+  "size": "1024x1024",
+  "quality": "high",
+  "output_format": "png",
+  "response_format": "b64_json",
+  "stream": true
+}
+```
+
+本轻量 MCP 仅支持 JSON `image_url` 编辑链路，不支持 multipart 文件上传与 mask 参数。
+
+其中：
+
+- `generate_image` 的 `size` 来自环境变量
+- `generate_image_with_size` 的 `size` 来自本次工具调用参数
+- `edit_image` 的 `size` 来自环境变量
+- `edit_image_with_size` 的 `size` 来自本次工具调用参数
+
+当 `GPT_IMG2_STREAM=false` 时，上述请求中的 `stream` 会关闭，改走非流式 JSON 返回。
 
 ---
 
@@ -376,8 +498,8 @@ curl -sS -X POST "https://your-cpa-domain.example/v1/images/generations" \
 
 ```text
 src/config.js       # 读取 env，构造 Images API 请求参数
-src/imageClient.js  # 请求 CPA，解析 b64_json / data URL，保存图片
-src/server.js       # stdio MCP server，注册 generate_image 和 generate_image_with_size
+src/imageClient.js  # 请求 CPA，处理流式/非流式生图与编辑，解析并保存最终图片
+src/server.js       # stdio MCP server，注册 4 个 MCP 工具（生图 + 编辑）
 .opencode/commands/ # OpenCode slash commands：/imggeneration、/imggeneration-small、/imggeneration-large
 test/               # Node.js 内置 test runner 测试
 ```
