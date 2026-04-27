@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { buildRequestOptions, loadConfig, withSizeOverride } from '../src/config.js';
+import {
+  buildImageRequestOptions,
+  buildRequestOptions,
+  loadConfig,
+  withSizeOverride,
+} from '../src/config.js';
 
 test('loadConfig applies lightweight image defaults from minimal environment', () => {
   const config = loadConfig({
@@ -59,6 +64,63 @@ test('loadConfig rejects invalid numeric parameters', () => {
   );
 });
 
+test('loadConfig enables streaming image requests by default', () => {
+  const config = loadConfig({ GPT_IMG2_BASE_URL: 'https://api.example.test/v1' });
+
+  assert.equal(config.stream, true);
+});
+
+test('loadConfig parses GPT_IMG2_STREAM boolean values', () => {
+  assert.equal(
+    loadConfig({ GPT_IMG2_BASE_URL: 'https://api.example.test/v1', GPT_IMG2_STREAM: 'false' }).stream,
+    false,
+  );
+  assert.equal(
+    loadConfig({ GPT_IMG2_BASE_URL: 'https://api.example.test/v1', GPT_IMG2_STREAM: '0' }).stream,
+    false,
+  );
+  assert.equal(
+    loadConfig({ GPT_IMG2_BASE_URL: 'https://api.example.test/v1', GPT_IMG2_STREAM: 'yes' }).stream,
+    true,
+  );
+  assert.throws(
+    () => loadConfig({ GPT_IMG2_BASE_URL: 'https://api.example.test/v1', GPT_IMG2_STREAM: 'maybe' }),
+    /GPT_IMG2_STREAM must be a boolean/,
+  );
+});
+
+test('buildImageRequestOptions builds streaming generation requests by default', () => {
+  const config = loadConfig({ GPT_IMG2_BASE_URL: 'https://api.example.test/v1' });
+  const options = buildImageRequestOptions(config, { operation: 'generation', prompt: '测试' });
+
+  assert.equal(options.url, 'https://api.example.test/v1/images/generations');
+  assert.equal(options.body.stream, true);
+  assert.equal(options.body.prompt, '测试');
+});
+
+test('buildImageRequestOptions omits stream field when streaming is disabled', () => {
+  const config = loadConfig({
+    GPT_IMG2_BASE_URL: 'https://api.example.test/v1',
+    GPT_IMG2_STREAM: 'false',
+  });
+  const options = buildImageRequestOptions(config, { operation: 'generation', prompt: '测试' });
+
+  assert.equal(Object.hasOwn(options.body, 'stream'), false);
+});
+
+test('buildImageRequestOptions builds edit requests with image_url', () => {
+  const config = loadConfig({ GPT_IMG2_BASE_URL: 'https://api.example.test/v1' });
+  const options = buildImageRequestOptions(config, {
+    operation: 'edit',
+    prompt: '改成赛博朋克风格',
+    imageUrl: 'data:image/png;base64,aW1hZ2U=',
+  });
+
+  assert.equal(options.url, 'https://api.example.test/v1/images/edits');
+  assert.equal(options.body.stream, true);
+  assert.deepEqual(options.body.images, [{ image_url: 'data:image/png;base64,aW1hZ2U=' }]);
+});
+
 test('buildRequestOptions omits authorization header when API key is not configured', () => {
   const config = loadConfig({ GPT_IMG2_BASE_URL: 'https://api.example.test/v1' });
   const options = buildRequestOptions(config, '一张图');
@@ -74,6 +136,7 @@ test('buildRequestOptions omits authorization header when API key is not configu
     quality: 'high',
     output_format: 'png',
     response_format: 'b64_json',
+    stream: true,
   });
 });
 
@@ -101,6 +164,7 @@ test('buildRequestOptions includes configured optional image parameters', () => 
     quality: 'medium',
     output_format: 'webp',
     response_format: 'url',
+    stream: true,
     background: 'transparent',
     moderation: 'low',
     output_compression: 75,
